@@ -62,7 +62,9 @@ class OpenVikingService:
         )
         self._config = config
         self._user = user or UserIdentifier(
-            config.default_account, config.default_user, config.default_agent
+            (config.default_account or "default"),
+            (config.default_user or "default"),
+            (config.default_agent or "default"),
         )
 
         # Infrastructure
@@ -96,7 +98,7 @@ class OpenVikingService:
         )
 
         # Initialize embedder
-        self._embedder = config.embedding.get_embedder()
+        self._embedder = config.embedding.get_query_embedder()
         logger.info(
             f"Initialized embedder (dim {config.embedding.dimension}, sparse {self._embedder.is_sparse})"
         )
@@ -141,7 +143,10 @@ class OpenVikingService:
             self._queue_manager.setup_standard_queues(self._vikingdb_manager)
 
         # Initialize TransactionManager
-        self._transaction_manager = init_transaction_manager(agfs=self._agfs_client)
+        if self._agfs_client:
+            self._transaction_manager = init_transaction_manager(agfs=self._agfs_client)
+        else:
+            logger.warning("AGFS client not initialized, skipping transaction manager")
 
     @property
     def _agfs(self) -> Any:
@@ -230,20 +235,28 @@ class OpenVikingService:
         enable_recorder = os.environ.get("OPENVIKING_ENABLE_RECORDER", "").lower() == "true"
 
         # Create context collection
-        await init_context_collection(self._vikingdb_manager)
+        if self._vikingdb_manager is None:
+            raise RuntimeError("VikingDBManager not initialized")
+        vikingdb_manager = self._vikingdb_manager
+        await init_context_collection(vikingdb_manager)
+
+        if self._agfs_client is None:
+            raise RuntimeError("AGFS client not initialized")
+        if self._embedder is None:
+            raise RuntimeError("Embedder not initialized")
 
         self._viking_fs = init_viking_fs(
             agfs=self._agfs_client,
             query_embedder=self._embedder,
             rerank_config=config.rerank,
-            vector_store=self._vikingdb_manager,
+            vector_store=vikingdb_manager,
             enable_recorder=enable_recorder,
         )
         if enable_recorder:
             logger.info("VikingFS IO Recorder enabled")
 
         # Initialize directories
-        directory_initializer = DirectoryInitializer(vikingdb=self._vikingdb_manager)
+        directory_initializer = DirectoryInitializer(vikingdb=vikingdb_manager)
         self._directory_initializer = directory_initializer
         default_ctx = RequestContext(user=self._user, role=Role.ROOT)
         account_count = await directory_initializer.initialize_account_directories(default_ctx)
@@ -256,10 +269,10 @@ class OpenVikingService:
 
         # Initialize processors
         self._resource_processor = ResourceProcessor(
-            vikingdb=self._vikingdb_manager,
+            vikingdb=vikingdb_manager,
         )
-        self._skill_processor = SkillProcessor(vikingdb=self._vikingdb_manager)
-        self._session_compressor = SessionCompressor(vikingdb=self._vikingdb_manager)
+        self._skill_processor = SkillProcessor(vikingdb=vikingdb_manager)
+        self._session_compressor = SessionCompressor(vikingdb=vikingdb_manager)
 
         # Start TransactionManager if initialized
         if self._transaction_manager:
@@ -272,18 +285,18 @@ class OpenVikingService:
         self._pack_service.set_viking_fs(self._viking_fs)
         self._search_service.set_viking_fs(self._viking_fs)
         self._resource_service.set_dependencies(
-            vikingdb=self._vikingdb_manager,
+            vikingdb=vikingdb_manager,
             viking_fs=self._viking_fs,
             resource_processor=self._resource_processor,
             skill_processor=self._skill_processor,
         )
         self._session_service.set_dependencies(
-            vikingdb=self._vikingdb_manager,
+            vikingdb=vikingdb_manager,
             viking_fs=self._viking_fs,
             session_compressor=self._session_compressor,
         )
         self._debug_service.set_dependencies(
-            vikingdb=self._vikingdb_manager,
+            vikingdb=vikingdb_manager,
             config=self._config,
         )
 
