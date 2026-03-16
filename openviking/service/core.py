@@ -62,9 +62,7 @@ class OpenVikingService:
         )
         self._config = config
         self._user = user or UserIdentifier(
-            (config.default_account or "default"),
-            (config.default_user or "default"),
-            (config.default_agent or "default"),
+            config.default_account, config.default_user, config.default_agent
         )
 
         # Infrastructure
@@ -134,9 +132,7 @@ class OpenVikingService:
             logger.warning("AGFS client not initialized, skipping queue manager")
 
         # Initialize VikingDBManager with QueueManager
-        self._vikingdb_manager = VikingDBManager(
-            vectordb_config=config.vectordb, queue_manager=self._queue_manager
-        )
+        self._vikingdb_manager = VikingDBManager(vectordb_config=config.vectordb, queue_manager=self._queue_manager)
 
         # Configure queues if QueueManager is available
         if self._queue_manager:

@@ -117,15 +117,6 @@ class OpenAIDenseEmbedder(DenseEmbedderBase):
             # Use default value, text-embedding-3-small defaults to 1536
             return 1536
 
-    def _build_extra_body(self) -> Optional[Dict[str, Any]]:
-        """Build extra_body dict for OpenAI-specific parameters"""
-        extra_body = {}
-        if self.input_type is not None:
-            extra_body["input_type"] = self.input_type
-        return extra_body if extra_body else None
-
-    def embed(self, text: str) -> EmbedResult:
-        """Perform dense embedding on text
     def _update_telemetry_token_usage(self, response) -> None:
         usage = getattr(response, "usage", None)
         if not usage:
@@ -144,6 +135,13 @@ class OpenAIDenseEmbedder(DenseEmbedderBase):
             prompt_tokens,
             output_tokens,
         )
+
+    def _build_extra_body(self) -> Optional[Dict[str, Any]]:
+        """Build extra_body dict for OpenAI-specific parameters"""
+        extra_body = {}
+        if self.input_type is not None:
+            extra_body["input_type"] = self.input_type
+        return extra_body if extra_body else None
 
     def _embed_single(self, text: str) -> EmbedResult:
         """Perform raw embedding without chunking logic.
@@ -211,20 +209,6 @@ class OpenAIDenseEmbedder(DenseEmbedderBase):
         if not texts:
             return []
 
-        try:
-            kwargs: Dict[str, Any] = {"input": texts, "model": self.model_name}
-
-            extra_body = self._build_extra_body()
-            if extra_body:
-                kwargs["extra_body"] = extra_body
-
-            response = self.client.embeddings.create(**kwargs)
-
-            return [EmbedResult(dense_vector=item.embedding) for item in response.data]
-        except openai.APIError as e:
-            raise RuntimeError(f"OpenAI API error: {e.message}") from e
-        except Exception as e:
-            raise RuntimeError(f"Batch embedding failed: {str(e)}") from e
         results: List[Optional[EmbedResult]] = [None] * len(texts)
         short_indices: List[int] = []
         short_texts: List[str] = []
@@ -238,9 +222,11 @@ class OpenAIDenseEmbedder(DenseEmbedderBase):
 
         if short_texts:
             try:
-                kwargs = {"input": short_texts, "model": self.model_name}
-                if self.dimension:
-                    kwargs["dimensions"] = self.dimension
+                kwargs: Dict[str, Any] = {"input": short_texts, "model": self.model_name}
+
+                extra_body = self._build_extra_body()
+                if extra_body:
+                    kwargs["extra_body"] = extra_body
 
                 response = self.client.embeddings.create(**kwargs)
                 self._update_telemetry_token_usage(response)
